@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>点线领地</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="screen start-screen" id="startScreen" aria-labelledby="gameTitle">
+        <div class="start-layout">
+          <div class="brand-block">
+            <p class="eyebrow">6 x 6 点阵抢地盘</p>
+            <h1 id="gameTitle">点线领地</h1>
+            <p class="lead">横竖连线，封口占格。骰子决定先手，最后比谁的地盘更多。</p>
+          </div>
+
+          <div class="profile-panel" aria-label="玩家资料">
+            <div class="avatar-preview" id="profileAvatar" aria-hidden="true"></div>
+            <div class="profile-copy">
+              <strong id="profileName">玩家</strong>
+              <span id="profileUid">UID-000000</span>
+            </div>
+            <button class="icon-button" id="openSettingsBtn" type="button" aria-label="打开设置">
+              <span class="icon-sliders" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="mode-grid" aria-label="选择模式">
+            <button class="mode-card" id="pveBtn" type="button">
+              <span class="mode-icon mode-ai" aria-hidden="true"></span>
+              <span class="mode-title">人机模式</span>
+              <span class="mode-desc">选择难度，或 roll 一个</span>
+            </button>
+            <button class="mode-card" id="pvpBtn" type="button">
+              <span class="mode-icon mode-pvp" aria-hidden="true"></span>
+              <span class="mode-title">1v1 匹配</span>
+              <span class="mode-desc">随机匹配玩家，先做同屏对战</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen match-screen hidden" id="matchScreen" aria-live="polite">
+        <div class="match-card">
+          <div class="pulse-ring" aria-hidden="true"></div>
+          <h2 id="matchTitle">正在随机匹配</h2>
+          <p id="matchText">寻找实力接近的对手...</p>
+          <button class="secondary-button" id="cancelMatchBtn" type="button">取消</button>
+        </div>
+      </section>
+
+      <section class="screen game-screen hidden" id="gameScreen" aria-labelledby="arenaTitle">
+        <header class="game-header">
+          <button class="ghost-button" id="backHomeBtn" type="button">返回</button>
+          <div>
+            <p class="eyebrow" id="modeLabel">人机模式</p>
+            <h2 id="arenaTitle">领地争夺</h2>
+          </div>
+          <button class="secondary-button" id="restartBtn" type="button">重新开局</button>
+        </header>
+
+        <div class="score-row" aria-label="比分">
+          <div class="player-score active" id="player0Card">
+            <div class="mini-avatar" id="player0Avatar" aria-hidden="true"></div>
+            <div>
+              <span id="player0Name">玩家</span>
+              <strong id="player0Score">0</strong>
+            </div>
+          </div>
+          <div class="turn-panel">
+            <span id="turnText">掷骰决定先手</span>
+            <strong id="diceText">- : -</strong>
+            <div class="turn-timer hidden" id="turnTimer" aria-live="polite">
+              <div class="timer-bomb">
+                <img src="./assets/timer-bomb.png" alt="">
+                <span class="timer-spark" aria-hidden="true"></span>
+              </div>
+              <div class="timer-copy">
+                <span>思考倒计时</span>
+                <strong id="turnTimerText">30s</strong>
+                <div class="timer-bar" aria-hidden="true">
+                  <span id="turnTimerFill"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="player-score" id="player1Card">
+            <div class="mini-avatar rival-avatar" id="player1Avatar" aria-hidden="true"></div>
+            <div>
+              <span id="player1Name">对手</span>
+              <strong id="player1Score">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="board-wrap">
+          <svg id="board" class="board" viewBox="0 0 500 500" role="img" aria-label="6 乘 6 黑点连线棋盘"></svg>
+        </div>
+
+        <div class="game-footer">
+          <p id="statusText">点击空白线段开始连线。</p>
+          <button class="secondary-button" id="rollAgainBtn" type="button">重新掷骰</button>
+        </div>
+      </section>
+    </main>
+
+    <div class="modal-backdrop hidden" id="difficultyModal" role="dialog" aria-modal="true" aria-labelledby="difficultyTitle">
+      <section class="difficulty-card">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">人机模式</p>
+            <h2 id="difficultyTitle">选择 AI 难度</h2>
+          </div>
+          <button class="icon-button" id="closeDifficultyBtn" type="button" aria-label="关闭难度选择">
+            <span class="icon-close" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <div class="difficulty-grid" aria-label="选择难度">
+          <button class="difficulty-option difficulty-easy" type="button" data-difficulty="简单">
+            <span>简单</span>
+            <small>AI 更随意，适合熟悉规则</small>
+          </button>
+          <button class="difficulty-option difficulty-medium" type="button" data-difficulty="中等">
+            <span>中等</span>
+            <small>会优先抢地，也会偶尔失误</small>
+          </button>
+          <button class="difficulty-option difficulty-hard" type="button" data-difficulty="困难">
+            <span>困难</span>
+            <small>尽量避坑，抢封口机会</small>
+          </button>
+        </div>
+
+        <div class="roll-box" id="rollBox" aria-live="polite">
+          <button class="roll-reel" id="rollReel" type="button" aria-label="随机选择 AI 难度">?</button>
+          <div class="roll-track" aria-hidden="true">
+            <span id="rollTrackFill"></span>
+          </div>
+          <button class="primary-button" id="rollDifficultyBtn" type="button">roll 一个</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <section class="settings-card">
+        <div class="modal-head">
+          <h2 id="settingsTitle">设置</h2>
+          <button class="icon-button" id="closeSettingsBtn" type="button" aria-label="关闭设置">
+            <span class="icon-close" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <label class="field-label" for="nameInput">姓名</label>
+        <input class="text-input" id="nameInput" type="text" maxlength="12" autocomplete="nickname">
+
+        <div class="uid-line">
+          <div>
+            <span class="field-label">游戏 UID</span>
+            <strong id="uidDisplay">UID-000000</strong>
+          </div>
+          <button class="secondary-button" id="regenUidBtn" type="button">换一个</button>
+        </div>
+
+        <fieldset class="avatar-picker">
+          <legend>头像</legend>
+          <button type="button" class="avatar-choice avatar-aurora" data-avatar="aurora" aria-label="头像 1"></button>
+          <button type="button" class="avatar-choice avatar-spark" data-avatar="spark" aria-label="头像 2"></button>
+          <button type="button" class="avatar-choice avatar-orbit" data-avatar="orbit" aria-label="头像 3"></button>
+          <button type="button" class="avatar-choice avatar-wave" data-avatar="wave" aria-label="头像 4"></button>
+        </fieldset>
+
+        <label class="field-label volume-label" for="volumeInput">
+          声音大小 <span id="volumeValue">60%</span>
+        </label>
+        <input class="range-input" id="volumeInput" type="range" min="0" max="100" step="1">
+
+        <label class="music-switch" for="musicToggle">
+          <input id="musicToggle" type="checkbox">
+          <span>背景音乐</span>
+        </label>
+
+        <button class="primary-button" id="saveSettingsBtn" type="button">保存设置</button>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="resultModal" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+      <section class="result-card">
+        <h2 id="resultTitle">对局结束</h2>
+        <p id="resultText">比分 0 : 0</p>
+        <div class="result-actions">
+          <button class="primary-button" id="playAgainBtn" type="button">再来一局</button>
+          <button class="secondary-button" id="resultHomeBtn" type="button">回到开始</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="dice-overlay hidden" id="diceOverlay" role="dialog" aria-modal="true" aria-labelledby="diceOverlayTitle">
+      <section class="dice-card">
+        <p class="eyebrow">开局仪式</p>
+        <h2 id="diceOverlayTitle">投骰子决定先手</h2>
+        <div class="dice-stage" aria-live="polite">
+          <div class="dice-player">
+            <span id="dicePlayer0Name">玩家</span>
+            <div class="dice-cube" id="diceCube0">?</div>
+          </div>
+          <div class="dice-versus">VS</div>
+          <div class="dice-player">
+            <span id="dicePlayer1Name">对手</span>
+            <div class="dice-cube" id="diceCube1">?</div>
+          </div>
+        </div>
+        <p id="diceRollText">骰子正在滚动...</p>
+      </section>
+    </div>
+
+    <script src="./game.js"></script>
+  </body>
+</html>
