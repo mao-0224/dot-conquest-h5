@@ -246,6 +246,14 @@ h2 {
   gap: 16px;
 }
 
+.version-badge {
+  grid-column: 2;
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
 .mode-card {
   min-height: 148px;
   padding: 22px;
@@ -1252,6 +1260,7 @@ h2 {
               <span class="mode-desc">生成链接，邀请朋友一起玩</span>
             </button>
           </div>
+          <p class="version-badge">好友房版 v20260723-1248</p>
         </div>
       </section>
 
@@ -1440,9 +1449,15 @@ const STORAGE_KEY = "dot-conquest-profile";
 const AVATARS = ["aurora", "spark", "orbit", "wave"];
 const AI_LEVELS = ["简单", "中等", "困难"];
 const RIVALS = ["星河", "边界线", "青焰", "北桥", "拾光", "回声"];
+const APP_VERSION = "v20260723-1248";
 const PVP_TURN_SECONDS = 30;
 const ONLINE_APP_ID = "dot-conquest-friend-room-v1";
-const ONLINE_CDN = "https://esm.run/trystero";
+const ONLINE_CDNS = [
+  "https://esm.run/trystero",
+  "https://esm.sh/trystero",
+  "https://cdn.jsdelivr.net/npm/trystero/+esm"
+];
+const PUBLIC_GAME_URL = "https://mao-0224.github.io/dot-conquest-h5/";
 const BGM_URL = "https://cdn1.suno.ai/8543ff7f-8571-4772-862f-a0c893b41fce.mp3";
 const MUSIC_TEMPO = 126;
 const MUSIC_SCALE = {
@@ -1800,8 +1815,10 @@ function getRoomIdFromUrl() {
 }
 
 function buildRoomLink(roomId) {
-  const url = new URL(window.location.href);
+  const baseUrl = window.location.protocol === "file:" ? PUBLIC_GAME_URL : window.location.href;
+  const url = new URL(baseUrl);
   url.searchParams.set("room", roomId);
+  url.searchParams.set("v", APP_VERSION);
   return url.toString();
 }
 
@@ -2489,9 +2506,30 @@ function commitSettings() {
 
 function loadOnlineModule() {
   if (!onlineModulePromise) {
-    onlineModulePromise = import(ONLINE_CDN);
+    onlineModulePromise = (async () => {
+      let lastError = null;
+      for (const cdn of ONLINE_CDNS) {
+        try {
+          const module = await import(cdn);
+          if (typeof module.joinRoom === "function") return module;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError || new Error("online module unavailable");
+    })();
   }
   return onlineModulePromise;
+}
+
+function showLocalOnlineNotice() {
+  leaveOnlineRoom();
+  hideRoomInvite();
+  setScreen("match");
+  els.matchTitle.textContent = "本地预览不能测试好友房";
+  els.matchText.textContent = "请先把最新版 index.html 上传到 GitHub Pages，再用 https 网页生成链接发给朋友。人机模式可以继续本地玩。";
+  els.cancelMatchBtn.textContent = "返回开始";
+  playSound("block");
 }
 
 function showRoomInvite(roomId) {
@@ -2511,6 +2549,11 @@ function hideRoomInvite() {
 }
 
 async function connectOnlineRoom(roomId, role) {
+  if (window.location.protocol === "file:") {
+    showLocalOnlineNotice();
+    return;
+  }
+
   window.clearTimeout(matchTimer);
   leaveOnlineRoom();
   clearPvpTurnTimer();
@@ -2592,7 +2635,7 @@ async function connectOnlineRoom(roomId, role) {
     hideRoomInvite();
     setScreen("match");
     els.matchTitle.textContent = "联机服务加载失败";
-    els.matchText.textContent = "当前网络没有加载到好友房通道。稍后重试，或先玩人机模式。";
+    els.matchText.textContent = `${APP_VERSION} 没有加载到好友房通道。请先确认页面底部版本号一致，再用浏览器强制刷新；如果仍失败，就是当前网络拦截了联机 CDN。`;
     els.cancelMatchBtn.textContent = "返回开始";
     playSound("block");
   }
@@ -2600,6 +2643,12 @@ async function connectOnlineRoom(roomId, role) {
 
 function createFriendRoom() {
   const roomId = makeRoomId();
+  if (window.location.protocol === "file:") {
+    showRoomInvite(roomId);
+    els.matchTitle.textContent = "本地预览已生成好友房链接";
+    els.matchText.textContent = "复制这个 GitHub Pages 链接发给朋友。真正联机要在上传后的 https 网页里打开。";
+    return;
+  }
   const url = new URL(window.location.href);
   url.searchParams.set("room", roomId);
   window.history.replaceState(null, "", url.toString());
