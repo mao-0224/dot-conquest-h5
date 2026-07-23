@@ -590,6 +590,26 @@ h2 {
   }
 }
 
+.room-invite {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 14px;
+  border-radius: 8px;
+  text-align: left;
+  background: rgba(93, 195, 160, 0.12);
+  border: 1px solid rgba(63, 49, 72, 0.08);
+}
+
+.room-invite label {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.room-invite .text-input {
+  font-size: 14px;
+}
+
 .game-screen {
   align-content: start;
   gap: 18px;
@@ -1197,7 +1217,7 @@ h2 {
   }
 }
 
-    </style>
+</style>
   </head>
   <body>
     <main class="app-shell">
@@ -1228,8 +1248,8 @@ h2 {
             </button>
             <button class="mode-card" id="pvpBtn" type="button">
               <span class="mode-icon mode-pvp" aria-hidden="true"></span>
-              <span class="mode-title">1v1 匹配</span>
-              <span class="mode-desc">随机匹配玩家，先做同屏对战</span>
+              <span class="mode-title">1v1 好友房</span>
+              <span class="mode-desc">生成链接，邀请朋友一起玩</span>
             </button>
           </div>
         </div>
@@ -1238,8 +1258,13 @@ h2 {
       <section class="screen match-screen hidden" id="matchScreen" aria-live="polite">
         <div class="match-card">
           <div class="pulse-ring" aria-hidden="true"></div>
-          <h2 id="matchTitle">正在随机匹配</h2>
-          <p id="matchText">寻找实力接近的对手...</p>
+          <h2 id="matchTitle">好友房</h2>
+          <p id="matchText">创建链接，邀请朋友一起玩。</p>
+          <div class="room-invite hidden" id="roomInvite">
+            <label for="roomLinkInput">房间链接</label>
+            <input id="roomLinkInput" class="text-input" type="text" readonly>
+            <button class="primary-button" id="copyRoomLinkBtn" type="button">复制链接</button>
+          </div>
           <button class="secondary-button" id="cancelMatchBtn" type="button">取消</button>
         </div>
       </section>
@@ -1416,6 +1441,8 @@ const AVATARS = ["aurora", "spark", "orbit", "wave"];
 const AI_LEVELS = ["简单", "中等", "困难"];
 const RIVALS = ["星河", "边界线", "青焰", "北桥", "拾光", "回声"];
 const PVP_TURN_SECONDS = 30;
+const ONLINE_APP_ID = "dot-conquest-friend-room-v1";
+const ONLINE_CDN = "https://esm.run/trystero";
 const BGM_URL = "https://cdn1.suno.ai/8543ff7f-8571-4772-862f-a0c893b41fce.mp3";
 const MUSIC_TEMPO = 126;
 const MUSIC_SCALE = {
@@ -1511,6 +1538,9 @@ const els = {
   cancelMatchBtn: document.getElementById("cancelMatchBtn"),
   matchTitle: document.getElementById("matchTitle"),
   matchText: document.getElementById("matchText"),
+  roomInvite: document.getElementById("roomInvite"),
+  roomLinkInput: document.getElementById("roomLinkInput"),
+  copyRoomLinkBtn: document.getElementById("copyRoomLinkBtn"),
   backHomeBtn: document.getElementById("backHomeBtn"),
   restartBtn: document.getElementById("restartBtn"),
   rollAgainBtn: document.getElementById("rollAgainBtn"),
@@ -1556,6 +1586,7 @@ let musicGain = null;
 let musicMainLoops = 0;
 let bgmAudio = null;
 let bgmFadeTimer = null;
+let onlineModulePromise = null;
 
 const state = {
   profile: loadProfile(),
@@ -1574,7 +1605,20 @@ const state = {
   diceRolling: false,
   rollingDifficulty: false,
   musicPlaying: false,
-  musicEnding: false
+  musicEnding: false,
+  online: {
+    active: false,
+    roomId: "",
+    role: "",
+    localPlayer: 0,
+    room: null,
+    sendState: null,
+    sendHello: null,
+    peerConnected: false,
+    remoteProfile: null,
+    started: false,
+    applyingRemote: false
+  }
 };
 
 function loadProfile() {
@@ -1741,6 +1785,59 @@ function pickRandom(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+function makeRoomId() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let value = "";
+  for (let i = 0; i < 6; i += 1) {
+    value += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return value;
+}
+
+function getRoomIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return (params.get("room") || "").trim().toUpperCase();
+}
+
+function buildRoomLink(roomId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("room", roomId);
+  return url.toString();
+}
+
+function canLocalAct() {
+  return !state.online.active || state.currentPlayer === state.online.localPlayer;
+}
+
+function profileForOnline() {
+  return {
+    name: state.profile.name,
+    uid: state.profile.uid,
+    avatar: state.profile.avatar
+  };
+}
+
+function leaveOnlineRoom() {
+  if (state.online.room?.leave) {
+    try {
+      state.online.room.leave();
+    } catch (error) {
+      // Leaving an already closed room is harmless.
+    }
+  }
+  state.online.active = false;
+  state.online.roomId = "";
+  state.online.role = "";
+  state.online.localPlayer = 0;
+  state.online.room = null;
+  state.online.sendState = null;
+  state.online.sendHello = null;
+  state.online.peerConnected = false;
+  state.online.remoteProfile = null;
+  state.online.started = false;
+  state.online.applyingRemote = false;
+}
+
 function setScreen(name) {
   els.startScreen.classList.toggle("hidden", name !== "start");
   els.matchScreen.classList.toggle("hidden", name !== "match");
@@ -1750,6 +1847,15 @@ function setScreen(name) {
 function applyAvatarClass(element, avatar) {
   AVATARS.forEach((name) => element.classList.remove(`avatar-${name}`));
   element.classList.add(`avatar-${avatar}`);
+}
+
+function applyPlayerAvatar(element, avatar) {
+  element.className = "mini-avatar";
+  if (AVATARS.includes(avatar)) {
+    applyAvatarClass(element, avatar);
+  } else {
+    element.classList.add("rival-avatar");
+  }
 }
 
 function syncProfileUi() {
@@ -1771,7 +1877,7 @@ function setStatus(text) {
 }
 
 function isTurnTimerActive() {
-  return !state.gameOver && !state.diceRolling && state.players[state.currentPlayer]?.type === "human";
+  return !state.gameOver && !state.diceRolling && state.players[state.currentPlayer]?.type === "human" && canLocalAct();
 }
 
 function clearPvpTurnTimer() {
@@ -1989,11 +2095,119 @@ function setupPlayers(mode, aiLevel = state.aiLevel) {
         type: "human"
       }
     ];
-    els.modeLabel.textContent = "1v1 随机匹配 · 前端同屏版";
+    els.modeLabel.textContent = "1v1 好友房";
   }
 }
 
+function setupOnlinePlayers() {
+  const local = {
+    ...profileForOnline(),
+    type: "human"
+  };
+  const remote = state.online.remoteProfile
+    ? { ...state.online.remoteProfile, type: "human" }
+    : { name: "好友", uid: "FRIEND", avatar: "rival", type: "human" };
+  state.players = state.online.localPlayer === 0 ? [local, remote] : [remote, local];
+  els.modeLabel.textContent = `1v1 好友房 · ${state.online.roomId}`;
+}
+
+function makeOnlineSnapshot(phase = "sync", status = "") {
+  return {
+    phase,
+    status,
+    mode: "online",
+    players: state.players,
+    edges: Array.from(state.edges.entries()),
+    owners: state.owners,
+    currentPlayer: state.currentPlayer,
+    scores: state.scores,
+    dice: state.dice,
+    turnMoves: state.turnMoves,
+    gameOver: state.gameOver,
+    updatedAt: Date.now()
+  };
+}
+
+function sendOnlineState(phase = "sync", status = "") {
+  if (!state.online.active || !state.online.sendState || state.online.applyingRemote) return;
+  try {
+    state.online.sendState(makeOnlineSnapshot(phase, status));
+  } catch (error) {
+    setStatus("联机同步发送失败，可能是对方网络断开了。");
+  }
+}
+
+function applyOnlineSnapshot(snapshot) {
+  if (!snapshot || snapshot.mode !== "online") return;
+  state.online.applyingRemote = true;
+  clearPvpTurnTimer();
+  clearDiceRollAnimation();
+  state.mode = "online";
+  state.players = Array.isArray(snapshot.players) ? snapshot.players : state.players;
+  state.edges = new Map(Array.isArray(snapshot.edges) ? snapshot.edges : []);
+  state.owners = Array.isArray(snapshot.owners) ? snapshot.owners : createOwners();
+  state.currentPlayer = Number.isFinite(snapshot.currentPlayer) ? snapshot.currentPlayer : 0;
+  state.scores = Array.isArray(snapshot.scores) ? snapshot.scores : [0, 0];
+  state.dice = Array.isArray(snapshot.dice) ? snapshot.dice : [0, 0];
+  state.turnMoves = Number.isFinite(snapshot.turnMoves) ? snapshot.turnMoves : 0;
+  state.gameOver = Boolean(snapshot.gameOver);
+  state.aiThinking = false;
+  state.diceRolling = false;
+  els.resultModal.classList.add("hidden");
+  setScreen("game");
+  renderAll();
+
+  const afterDice = () => {
+    const activeName = state.players[state.currentPlayer]?.name ?? "玩家";
+    setStatus(canLocalAct() ? `轮到你了，点击亮起的线段。` : `轮到 ${activeName}，等待好友行动。`);
+    startPvpTurnTimer();
+  };
+
+  if (snapshot.phase === "start") {
+    setStatus("好友已进入，正在投骰子决定先手。");
+    showDiceRollAnimation(afterDice);
+  } else {
+    setStatus(snapshot.status || (canLocalAct() ? "轮到你了。" : "等待好友行动。"));
+    if (state.gameOver) {
+      showResult(false);
+    } else {
+      startPvpTurnTimer();
+    }
+  }
+  state.online.applyingRemote = false;
+}
+
+function startOnlineHostGame() {
+  clearPvpTurnTimer();
+  clearDiceRollAnimation();
+  startBackgroundMusic();
+  state.mode = "online";
+  state.online.started = true;
+  setupOnlinePlayers();
+  state.edges = new Map();
+  state.owners = createOwners();
+  state.scores = [0, 0];
+  state.turnMoves = 0;
+  state.gameOver = false;
+  state.aiThinking = false;
+  state.diceRolling = false;
+  addInitialLines();
+  rollDice();
+  setScreen("game");
+  renderAll();
+  setStatus("好友已进入，正在投骰子决定先手。");
+  sendOnlineState("start", "好友已进入，正在投骰子决定先手。");
+  showDiceRollAnimation(() => {
+    const activeName = state.players[state.currentPlayer]?.name ?? "玩家";
+    const status = canLocalAct() ? "轮到你了，点击亮起的线段。" : `轮到 ${activeName}，等待好友行动。`;
+    setStatus(status);
+    startPvpTurnTimer();
+    sendOnlineState("sync", status);
+  });
+}
+
 function startGame(mode, aiLevel = state.aiLevel) {
+  if (mode !== "online") leaveOnlineRoom();
   clearPvpTurnTimer();
   clearDiceRollAnimation();
   startBackgroundMusic();
@@ -2092,22 +2306,35 @@ function placeEdge(key, player, options = {}) {
   }
 
   renderAll();
-  startPvpTurnTimer();
-  maybeRunAi();
+  if (!state.gameOver) {
+    startPvpTurnTimer();
+    maybeRunAi();
+  }
+  sendOnlineState("sync", els.statusText.textContent);
+}
+
+function getWinnerText() {
+  const [a, b] = state.scores;
+  return a === b ? "平局" : a > b ? `${state.players[0].name} 获胜` : `${state.players[1].name} 获胜`;
+}
+
+function showResult(withSound = true) {
+  const [a, b] = state.scores;
+  const winner = getWinnerText();
+  els.resultTitle.textContent = winner;
+  els.resultText.textContent = `最终比分 ${a} : ${b}`;
+  els.resultModal.classList.remove("hidden");
+  if (withSound) {
+    playSound("win");
+    playOutroMusic();
+  }
 }
 
 function finishGame() {
   clearPvpTurnTimer();
   clearDiceRollAnimation();
   state.gameOver = true;
-  const [a, b] = state.scores;
-  const winner =
-    a === b ? "平局" : a > b ? `${state.players[0].name} 获胜` : `${state.players[1].name} 获胜`;
-  els.resultTitle.textContent = winner;
-  els.resultText.textContent = `最终比分 ${a} : ${b}`;
-  els.resultModal.classList.remove("hidden");
-  playSound("win");
-  playOutroMusic();
+  showResult(true);
 }
 
 function maybeRunAi() {
@@ -2161,14 +2388,16 @@ function renderPlayers() {
   els.player1Score.textContent = state.scores[1];
   els.player0Card.classList.toggle("active", state.currentPlayer === 0 && !state.gameOver);
   els.player1Card.classList.toggle("active", state.currentPlayer === 1 && !state.gameOver);
-  applyAvatarClass(els.player0Avatar, state.profile.avatar);
-  els.player1Avatar.className = "mini-avatar rival-avatar";
+  applyPlayerAvatar(els.player0Avatar, state.players[0]?.avatar ?? state.profile.avatar);
+  applyPlayerAvatar(els.player1Avatar, state.players[1]?.avatar ?? "rival");
   els.turnText.textContent = state.gameOver
     ? "对局结束"
     : state.diceRolling
       ? "骰子滚动中"
     : state.aiThinking
       ? "AI 思考中"
+      : state.online.active && !canLocalAct()
+        ? "好友行动中"
       : `${state.players[state.currentPlayer]?.name ?? "玩家"} 行动`;
   els.diceText.textContent = state.diceRolling ? "- : -" : `${state.dice[0]} : ${state.dice[1]}`;
 }
@@ -2258,27 +2487,139 @@ function commitSettings() {
   playSound("line");
 }
 
-function showMatch() {
+function loadOnlineModule() {
+  if (!onlineModulePromise) {
+    onlineModulePromise = import(ONLINE_CDN);
+  }
+  return onlineModulePromise;
+}
+
+function showRoomInvite(roomId) {
   startBackgroundMusic();
   setScreen("match");
-  els.matchTitle.textContent = "正在随机匹配";
-  els.matchText.textContent = "寻找实力接近的对手...";
-  els.cancelMatchBtn.textContent = "取消";
+  els.matchTitle.textContent = "好友房已创建";
+  els.matchText.textContent = "把链接发给朋友，朋友打开后会自动加入。";
+  els.cancelMatchBtn.textContent = "返回开始";
+  els.roomInvite.classList.remove("hidden");
+  els.roomLinkInput.value = buildRoomLink(roomId);
   playSound("match");
+}
+
+function hideRoomInvite() {
+  els.roomInvite.classList.add("hidden");
+  els.roomLinkInput.value = "";
+}
+
+async function connectOnlineRoom(roomId, role) {
   window.clearTimeout(matchTimer);
-  matchTimer = window.setTimeout(() => {
-    els.matchTitle.textContent = "没有匹配到玩家";
-    els.matchText.textContent = "当前没有可用的线上玩家，请稍后再试。";
+  leaveOnlineRoom();
+  clearPvpTurnTimer();
+  clearDiceRollAnimation();
+  els.resultModal.classList.add("hidden");
+  state.online.active = true;
+  state.online.roomId = roomId;
+  state.online.role = role;
+  state.online.localPlayer = role === "host" ? 0 : 1;
+  state.online.peerConnected = false;
+  state.online.started = false;
+  state.mode = "online";
+
+  if (role === "host") {
+    showRoomInvite(roomId);
+  } else {
+    startBackgroundMusic();
+    setScreen("match");
+    hideRoomInvite();
+    els.matchTitle.textContent = "正在加入好友房";
+    els.matchText.textContent = `房间 ${roomId}，正在连接房主...`;
+    els.cancelMatchBtn.textContent = "返回开始";
+  }
+
+  try {
+    const { joinRoom } = await loadOnlineModule();
+    const room = joinRoom({ appId: ONLINE_APP_ID }, roomId);
+    const [sendState, getState] = room.makeAction("state");
+    const [sendHello, getHello] = room.makeAction("hello");
+    state.online.room = room;
+    state.online.sendState = sendState;
+    state.online.sendHello = sendHello;
+
+    getState((snapshot) => {
+      state.online.peerConnected = true;
+      applyOnlineSnapshot(snapshot);
+    });
+
+    getHello((profile) => {
+      state.online.peerConnected = true;
+      state.online.remoteProfile = profile;
+      if (state.online.role === "host" && !state.online.started) {
+        matchTimer = window.setTimeout(startOnlineHostGame, 320);
+      }
+    });
+
+    room.onPeerJoin(() => {
+      state.online.peerConnected = true;
+      sendHello(profileForOnline());
+      if (state.online.role === "host") {
+        els.matchTitle.textContent = "好友已加入";
+        els.matchText.textContent = "正在准备棋盘和投骰动画...";
+        matchTimer = window.setTimeout(() => {
+          if (!state.online.started) startOnlineHostGame();
+        }, 520);
+      }
+    });
+
+    room.onPeerLeave(() => {
+      state.online.peerConnected = false;
+      setStatus("好友离开了房间。");
+      if (state.mode === "online") {
+        els.matchText.textContent = "好友离开了房间，可以返回重新创建链接。";
+      }
+    });
+
+    sendHello(profileForOnline());
+    if (role === "guest") {
+      matchTimer = window.setTimeout(() => {
+        if (!state.online.peerConnected && state.online.active) {
+          els.matchTitle.textContent = "还没有连上房主";
+          els.matchText.textContent = "请确认房主还开着这个房间页面，或者让房主重新发一次链接。";
+          playSound("block");
+        }
+      }, 6000);
+    }
+  } catch (error) {
+    leaveOnlineRoom();
+    hideRoomInvite();
+    setScreen("match");
+    els.matchTitle.textContent = "联机服务加载失败";
+    els.matchText.textContent = "当前网络没有加载到好友房通道。稍后重试，或先玩人机模式。";
     els.cancelMatchBtn.textContent = "返回开始";
     playSound("block");
-  }, 1500);
+  }
+}
+
+function createFriendRoom() {
+  const roomId = makeRoomId();
+  const url = new URL(window.location.href);
+  url.searchParams.set("room", roomId);
+  window.history.replaceState(null, "", url.toString());
+  connectOnlineRoom(roomId, "host");
+}
+
+function joinFriendRoom(roomId) {
+  connectOnlineRoom(roomId, "guest");
 }
 
 function goHome() {
   window.clearTimeout(matchTimer);
+  leaveOnlineRoom();
+  hideRoomInvite();
   clearPvpTurnTimer();
   clearDiceRollAnimation();
   els.resultModal.classList.add("hidden");
+  const url = new URL(window.location.href);
+  url.searchParams.delete("room");
+  window.history.replaceState(null, "", url.toString());
   setScreen("start");
 }
 
@@ -2517,6 +2858,11 @@ function handleBoardPick(event) {
     playSound("block");
     return;
   }
+  if (state.online.active && !canLocalAct()) {
+    setStatus("现在是好友回合，等对方连线。");
+    playSound("block");
+    return;
+  }
   placeEdge(group.dataset.key, state.currentPlayer);
 }
 
@@ -2573,13 +2919,45 @@ els.rollReel.addEventListener("click", rollDifficulty);
 
 els.pvpBtn.addEventListener("click", () => {
   ensureAudioContext();
-  showMatch();
+  createFriendRoom();
+});
+
+els.copyRoomLinkBtn.addEventListener("click", async () => {
+  const link = els.roomLinkInput.value;
+  try {
+    await navigator.clipboard.writeText(link);
+    els.copyRoomLinkBtn.textContent = "已复制";
+    playSound("score");
+    window.setTimeout(() => {
+      els.copyRoomLinkBtn.textContent = "复制链接";
+    }, 1200);
+  } catch (error) {
+    els.roomLinkInput.focus();
+    els.roomLinkInput.select();
+    setStatus("复制失败，可以手动选中链接复制。");
+  }
 });
 
 els.cancelMatchBtn.addEventListener("click", goHome);
 els.backHomeBtn.addEventListener("click", goHome);
-els.restartBtn.addEventListener("click", restartGame);
+els.restartBtn.addEventListener("click", () => {
+  if (state.online.active) {
+    if (state.online.localPlayer !== 0) {
+      setStatus("好友房由房主重新开局。");
+      playSound("block");
+      return;
+    }
+    startOnlineHostGame();
+    return;
+  }
+  restartGame();
+});
 els.rollAgainBtn.addEventListener("click", () => {
+  if (state.online.active && state.online.localPlayer !== 0) {
+    setStatus("好友房由房主重新掷骰。");
+    playSound("block");
+    return;
+  }
   if (state.diceRolling) {
     setStatus("骰子正在滚动中。");
     return;
@@ -2593,6 +2971,7 @@ els.rollAgainBtn.addEventListener("click", () => {
       setStatus(`重新投骰结束，${state.players[state.currentPlayer].name} 先手。`);
       startPvpTurnTimer();
       maybeRunAi();
+      sendOnlineState("sync", els.statusText.textContent);
     });
   } else {
     setStatus("已经开始占格后不能重新掷骰。");
@@ -2601,6 +2980,14 @@ els.rollAgainBtn.addEventListener("click", () => {
 
 els.playAgainBtn.addEventListener("click", () => {
   els.resultModal.classList.add("hidden");
+  if (state.online.active) {
+    if (state.online.localPlayer === 0) {
+      startOnlineHostGame();
+    } else {
+      setStatus("等待房主重新开局。");
+    }
+    return;
+  }
   restartGame();
 });
 
@@ -2620,7 +3007,11 @@ window.addEventListener("keydown", (event) => {
 saveProfile();
 syncProfileUi();
 setScreen("start");
+const initialRoomId = getRoomIdFromUrl();
+if (initialRoomId) {
+  joinFriendRoom(initialRoomId);
+}
 
-    </script>
+</script>
   </body>
 </html>
