@@ -246,14 +246,6 @@ h2 {
   gap: 16px;
 }
 
-.version-badge {
-  grid-column: 2;
-  margin: -2px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: right;
-}
-
 .mode-card {
   min-height: 148px;
   padding: 22px;
@@ -1260,7 +1252,6 @@ h2 {
               <span class="mode-desc">生成链接，邀请朋友一起玩</span>
             </button>
           </div>
-          <p class="version-badge">好友房版 v20260723-1248</p>
         </div>
       </section>
 
@@ -1449,7 +1440,6 @@ const STORAGE_KEY = "dot-conquest-profile";
 const AVATARS = ["aurora", "spark", "orbit", "wave"];
 const AI_LEVELS = ["简单", "中等", "困难"];
 const RIVALS = ["星河", "边界线", "青焰", "北桥", "拾光", "回声"];
-const APP_VERSION = "v20260723-1248";
 const PVP_TURN_SECONDS = 30;
 const ONLINE_APP_ID = "dot-conquest-friend-room-v1";
 const ONLINE_CDNS = [
@@ -1818,7 +1808,6 @@ function buildRoomLink(roomId) {
   const baseUrl = window.location.protocol === "file:" ? PUBLIC_GAME_URL : window.location.href;
   const url = new URL(baseUrl);
   url.searchParams.set("room", roomId);
-  url.searchParams.set("v", APP_VERSION);
   return url.toString();
 }
 
@@ -2635,7 +2624,7 @@ async function connectOnlineRoom(roomId, role) {
     hideRoomInvite();
     setScreen("match");
     els.matchTitle.textContent = "联机服务加载失败";
-    els.matchText.textContent = `${APP_VERSION} 没有加载到好友房通道。请先确认页面底部版本号一致，再用浏览器强制刷新；如果仍失败，就是当前网络拦截了联机 CDN。`;
+    els.matchText.textContent = "当前网络没有加载到好友房通道。请确认是在 GitHub Pages 的 https 链接里打开，稍后重试，或先玩人机模式。";
     els.cancelMatchBtn.textContent = "返回开始";
     playSound("block");
   }
