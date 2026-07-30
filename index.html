@@ -926,6 +926,65 @@ body[data-faction="yellow"] .edge-player-1 {
   filter: drop-shadow(0 2px 3px rgba(54, 95, 188, 0.42));
 }
 
+.edge-ai-recent {
+  stroke: var(--red);
+  stroke-width: 17;
+  filter:
+    drop-shadow(0 0 7px rgba(239, 93, 79, 0.75))
+    drop-shadow(3px 3px 0 rgba(23, 23, 23, 0.16));
+  animation: ai-edge-pulse 0.95s ease-in-out infinite;
+}
+
+.ai-move-paw {
+  pointer-events: none;
+  filter:
+    drop-shadow(0 0 5px rgba(239, 93, 79, 0.58))
+    drop-shadow(3px 3px 0 rgba(23, 23, 23, 0.18));
+  animation: ai-paw-pop 1.15s ease-in-out infinite;
+}
+
+.paw-halo {
+  fill: rgba(255, 253, 247, 0.88);
+  stroke: var(--red);
+  stroke-width: 3;
+}
+
+.paw-pad {
+  fill: var(--red);
+  stroke: #fffdf7;
+  stroke-width: 2.5;
+}
+
+.paw-main {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: rotate(-7deg);
+}
+
+@keyframes ai-edge-pulse {
+  0%,
+  100% {
+    stroke-width: 15;
+    opacity: 0.96;
+  }
+
+  50% {
+    stroke-width: 21;
+    opacity: 1;
+  }
+}
+
+@keyframes ai-paw-pop {
+  0%,
+  100% {
+    opacity: 0.86;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
 .edge-hit-box {
   fill: rgba(255, 168, 194, 0.01);
   pointer-events: all;
@@ -1849,7 +1908,7 @@ const BOARD_SIZES = {
   "中等": 7,
   "困难": 8
 };
-const APP_VERSION = "v20260730-1425-claim-meow";
+const APP_VERSION = "v20260730-1445-ai-paw-hint";
 const PVP_TURN_SECONDS = 30;
 const DIGIT_SEGMENTS = {
   0: ["a", "b", "c", "d", "e", "f"],
@@ -2058,6 +2117,7 @@ const state = {
   rollingDifficulty: false,
   musicPlaying: false,
   musicEnding: false,
+  lastMove: null,
   puzzle: {
     index: 0,
     active: new Set(),
@@ -2685,6 +2745,7 @@ function startGame(mode, aiLevel = state.aiLevel) {
   state.owners = createOwners(state.gridSize);
   state.scores = [0, 0];
   state.turnMoves = 0;
+  state.lastMove = null;
   state.gameOver = false;
   state.aiThinking = false;
   state.diceRolling = false;
@@ -2744,6 +2805,12 @@ function placeEdge(key, player, options = {}) {
   if (state.gameOver || state.diceRolling || state.edges.has(key)) return;
   clearPvpTurnTimer();
   state.edges.set(key, player);
+  state.lastMove = {
+    key,
+    player,
+    isAi: state.players[player]?.type === "ai",
+    placedAt: Date.now()
+  };
   state.turnMoves += 1;
 
   let completed = 0;
@@ -2915,8 +2982,17 @@ function renderBoard() {
     const y2 = type === "v" ? y1 + step : y1;
     if (state.edges.has(key)) {
       const owner = state.edges.get(key);
-      const edgeClass = owner === -1 ? "edge-initial" : `edge-player-${owner}`;
+      const isRecentAiMove = state.lastMove?.key === key && state.lastMove.isAi && owner !== -1;
+      const edgeClass = [
+        owner === -1 ? "edge-initial" : `edge-player-${owner}`,
+        isRecentAiMove ? "edge-ai-recent" : ""
+      ].filter(Boolean).join(" ");
       parts.push(`<line class="edge-line ${edgeClass}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`);
+      if (isRecentAiMove) {
+        const markerX = type === "h" ? x1 + step / 2 : x1 + 18;
+        const markerY = type === "h" ? y1 - 18 : y1 + step / 2;
+        parts.push(`<g class="ai-move-paw" transform="translate(${markerX} ${markerY})"><circle class="paw-halo" cx="0" cy="0" r="25"></circle><ellipse class="paw-pad paw-main" cx="0" cy="8" rx="12" ry="9"></ellipse><circle class="paw-pad" cx="-13" cy="-5" r="6"></circle><circle class="paw-pad" cx="-4" cy="-12" r="6"></circle><circle class="paw-pad" cx="6" cy="-12" r="6"></circle><circle class="paw-pad" cx="15" cy="-5" r="6"></circle></g>`);
+      }
     } else if (isPlayableEdge(key)) {
       const hitX = type === "h" ? x1 + 4 : x1 - 19;
       const hitY = type === "h" ? y1 - 19 : y1 + 4;
