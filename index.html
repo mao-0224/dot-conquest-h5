@@ -1908,7 +1908,7 @@ const BOARD_SIZES = {
   "中等": 7,
   "困难": 8
 };
-const APP_VERSION = "v20260730-1445-ai-paw-hint";
+const APP_VERSION = "v20260731-1015-flex-puzzle-solve";
 const PVP_TURN_SECONDS = 30;
 const DIGIT_SEGMENTS = {
   0: ["a", "b", "c", "d", "e", "f"],
@@ -2379,6 +2379,7 @@ function buildExpressionPuzzle(config) {
 
   return {
     ...config,
+    kind: "equation",
     slots,
     initial,
     solution
@@ -2397,6 +2398,7 @@ function buildShapePuzzle() {
   ];
 
   return {
+    kind: "shape",
     type: "形状",
     prompt: "移动 2 根火柴，把盒子变成小房子。",
     hint: "把顶部横线和中间竖线搬到屋顶两边。",
@@ -3018,6 +3020,39 @@ function puzzleKey(items) {
   return Array.from(items).sort().join("|");
 }
 
+function activeSegmentsForPrefix(prefix) {
+  const segments = [];
+  state.puzzle.active.forEach((id) => {
+    if (id.startsWith(`${prefix}-`)) {
+      segments.push(id.slice(prefix.length + 1));
+    }
+  });
+  return segments.sort().join("|");
+}
+
+function symbolFromSegments(segments, allowedSymbols) {
+  return allowedSymbols.find((symbol) => puzzleKey(symbolSegments(symbol)) === segments) ?? "";
+}
+
+function currentEquationSymbols() {
+  return [
+    symbolFromSegments(activeSegmentsForPrefix("s0"), ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]),
+    symbolFromSegments(activeSegmentsForPrefix("s1"), ["+", "-"]),
+    symbolFromSegments(activeSegmentsForPrefix("s2"), ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]),
+    symbolFromSegments(activeSegmentsForPrefix("s3"), ["="]),
+    symbolFromSegments(activeSegmentsForPrefix("s4"), ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
+  ];
+}
+
+function isCurrentEquationValid() {
+  const [left, operator, right, equals, result] = currentEquationSymbols();
+  if (!left || !operator || !right || equals !== "=" || !result) return false;
+  const a = Number(left);
+  const b = Number(right);
+  const c = Number(result);
+  return operator === "+" ? a + b === c : a - b === c;
+}
+
 function currentPuzzleLevel() {
   return PUZZLE_LEVELS[state.puzzle.index] || PUZZLE_LEVELS[0];
 }
@@ -3109,7 +3144,9 @@ function setPuzzleStatus(text) {
 }
 
 function isPuzzleSolved() {
-  return puzzleKey(state.puzzle.active) === puzzleKey(currentPuzzleLevel().solution);
+  const level = currentPuzzleLevel();
+  if (level.kind === "equation") return isCurrentEquationValid();
+  return puzzleKey(state.puzzle.active) === puzzleKey(level.solution);
 }
 
 function checkPuzzleSolved() {
@@ -3125,7 +3162,8 @@ function checkPuzzleSolved() {
 
   state.puzzle.solved.add(state.puzzle.index);
   els.puzzleNextBtn.disabled = false;
-  setPuzzleStatus(`过关！用了 ${state.puzzle.moves} 步。`);
+  const solvedText = level.kind === "equation" ? `：${currentEquationSymbols().join("")}` : "";
+  setPuzzleStatus(`过关${solvedText}！用了 ${state.puzzle.moves} 步。`);
   playSound("win");
   renderPuzzleMap();
 }
